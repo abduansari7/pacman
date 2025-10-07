@@ -12,6 +12,7 @@
         body {
             margin: 0;
             padding: 0;
+            touch-action: none;
         }
     </style>
 </head>
@@ -23,7 +24,8 @@
 
         const GRID_SIZE = 20;
         const CELL_SIZE = 25;
-        const GHOST_COUNT = 3;
+        const BASE_PACMAN_SPEED = 100;
+        const BASE_GHOST_SPEED = 300;
 
         const INITIAL_MAZE = [
           [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
@@ -48,14 +50,37 @@
           [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
         ];
 
-        // Simple Ghost SVG component
         const Ghost = ({ className, fill, style }) => (
             <svg viewBox="0 0 24 24" fill={fill} className={className} style={style}>
                 <path d="M12 2C8.13 2 5 5.13 5 9v7l-1.5 1.5v2L5 21h14l1.5-1.5v-2L19 16V9c0-3.87-3.13-7-7-7zm-4 9c0-.55.45-1 1-1s1 .45 1 1-.45 1-1 1-1-.45-1-1zm6 0c0-.55.45-1 1-1s1 .45 1 1-.45 1-1 1-1-.45-1-1z"/>
             </svg>
         );
 
+        const ArrowButton = ({ direction, onClick }) => {
+          const arrows = {
+            up: '↑',
+            down: '↓',
+            left: '←',
+            right: '→'
+          };
+          
+          return (
+            <button
+              onMouseDown={onClick}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                onClick();
+              }}
+              className="bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-3xl w-16 h-16 rounded-lg shadow-lg"
+            >
+              {arrows[direction]}
+            </button>
+          );
+        };
+
         function PacmanGame() {
+          const [gameState, setGameState] = useState('menu');
+          const [level, setLevel] = useState(1);
           const [pacman, setPacman] = useState({ x: 1, y: 1 });
           const [ghosts, setGhosts] = useState([
             { x: 9, y: 9, color: 'red' },
@@ -65,15 +90,38 @@
           const [maze, setMaze] = useState(INITIAL_MAZE);
           const [score, setScore] = useState(0);
           const [powerMode, setPowerMode] = useState(false);
-          const [gameOver, setGameOver] = useState(false);
           const [direction, setDirection] = useState({ x: 0, y: 0 });
+
+          const pacmanSpeed = BASE_PACMAN_SPEED * (1 + (level - 1) * 0.005);
+          const ghostSpeed = BASE_GHOST_SPEED * (1 - (level - 1) * 0.15);
 
           const canMove = (x, y) => {
             return x >= 0 && x < GRID_SIZE && y >= 0 && y < GRID_SIZE && maze[y][x] !== 1;
           };
 
+          const checkLevelComplete = () => {
+            let hasDotsLeft = false;
+            for (let row of maze) {
+              for (let cell of row) {
+                if (cell === 2 || cell === 3) {
+                  hasDotsLeft = true;
+                  break;
+                }
+              }
+              if (hasDotsLeft) break;
+            }
+            
+            if (!hasDotsLeft && gameState === 'playing') {
+              if (level === 3) {
+                setGameState('gameWon');
+              } else {
+                setGameState('levelComplete');
+              }
+            }
+          };
+
           const movePacman = useCallback(() => {
-            if (gameOver || (direction.x === 0 && direction.y === 0)) return;
+            if (gameState !== 'playing' || (direction.x === 0 && direction.y === 0)) return;
 
             const newX = pacman.x + direction.x;
             const newY = pacman.y + direction.y;
@@ -97,10 +145,10 @@
 
               setPacman({ x: newX, y: newY });
             }
-          }, [pacman, direction, maze, gameOver]);
+          }, [pacman, direction, maze, gameState]);
 
           const moveGhosts = useCallback(() => {
-            if (gameOver) return;
+            if (gameState !== 'playing') return;
 
             setGhosts(prevGhosts => prevGhosts.map(ghost => {
               const directions = [
@@ -146,23 +194,28 @@
 
               return ghost;
             }));
-          }, [pacman, powerMode, gameOver, maze]);
+          }, [pacman, powerMode, gameState, maze]);
+
+          useEffect(() => {
+            checkLevelComplete();
+          }, [maze]);
 
           useEffect(() => {
             ghosts.forEach(ghost => {
-              if (ghost.x === pacman.x && ghost.y === pacman.y) {
+              if (ghost.x === pacman.x && ghost.y === pacman.y && gameState === 'playing') {
                 if (powerMode) {
                   setScore(s => s + 200);
                   setGhosts(g => g.filter(g => !(g.x === ghost.x && g.y === ghost.y)));
                 } else {
-                  setGameOver(true);
+                  setGameState('gameOver');
                 }
               }
             });
-          }, [pacman, ghosts, powerMode]);
+          }, [pacman, ghosts, powerMode, gameState]);
 
           useEffect(() => {
             const handleKeyPress = (e) => {
+              if (gameState !== 'playing') return;
               e.preventDefault();
               switch(e.key) {
                 case 'ArrowUp':
@@ -182,25 +235,25 @@
 
             window.addEventListener('keydown', handleKeyPress);
             return () => window.removeEventListener('keydown', handleKeyPress);
-          }, []);
+          }, [gameState]);
 
           useEffect(() => {
             const gameInterval = setInterval(() => {
               movePacman();
-            }, 100);
+            }, pacmanSpeed);
 
             return () => clearInterval(gameInterval);
-          }, [movePacman]);
+          }, [movePacman, pacmanSpeed]);
 
           useEffect(() => {
             const ghostInterval = setInterval(() => {
               moveGhosts();
-            }, 300);
+            }, ghostSpeed);
 
             return () => clearInterval(ghostInterval);
-          }, [moveGhosts]);
+          }, [moveGhosts, ghostSpeed]);
 
-          const resetGame = () => {
+          const startGame = () => {
             setPacman({ x: 1, y: 1 });
             setGhosts([
               { x: 9, y: 9, color: 'red' },
@@ -210,19 +263,64 @@
             setMaze(INITIAL_MAZE);
             setScore(0);
             setPowerMode(false);
-            setGameOver(false);
             setDirection({ x: 0, y: 0 });
+            setLevel(1);
+            setGameState('playing');
           };
+
+          const nextLevel = () => {
+            setPacman({ x: 1, y: 1 });
+            setGhosts([
+              { x: 9, y: 9, color: 'red' },
+              { x: 10, y: 9, color: 'pink' },
+              { x: 9, y: 10, color: 'cyan' }
+            ]);
+            setMaze(INITIAL_MAZE);
+            setPowerMode(false);
+            setDirection({ x: 0, y: 0 });
+            setLevel(level + 1);
+            setGameState('playing');
+          };
+
+          const quitGame = () => {
+            setGameState('menu');
+            setLevel(1);
+            setScore(0);
+          };
+
+          const handleDirectionButton = (dir) => {
+            if (gameState !== 'playing') return;
+            setDirection(dir);
+          };
+
+          if (gameState === 'menu') {
+            return (
+              <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 p-4">
+                <h1 className="text-6xl font-bold text-yellow-400 mb-8">PAC-MAN</h1>
+                <div className="text-white text-center mb-8 max-w-md">
+                  <p className="mb-4">Complete 3 levels to win!</p>
+                  <p className="mb-4">Each level gets harder - ghosts get faster and Pac-Man gets slower.</p>
+                  <p className="text-sm text-gray-400">Use arrow keys or on-screen buttons to move</p>
+                </div>
+                <button
+                  onClick={startGame}
+                  className="bg-yellow-400 hover:bg-yellow-500 text-gray-900 font-bold text-2xl px-12 py-6 rounded-lg shadow-lg"
+                >
+                  PLAY GAME
+                </button>
+              </div>
+            );
+          }
 
           return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 p-4">
               <div className="mb-4 text-white text-2xl font-bold">
-                Score: {score}
+                Level: {level} | Score: {score}
                 {powerMode && <span className="ml-4 text-yellow-400">POWER MODE!</span>}
               </div>
               
               <div 
-                className="relative bg-black border-4 border-blue-600"
+                className="relative bg-black border-4 border-blue-600 mb-4"
                 style={{ 
                   width: GRID_SIZE * CELL_SIZE, 
                   height: GRID_SIZE * CELL_SIZE 
@@ -283,26 +381,82 @@
                   />
                 ))}
 
-                {gameOver && (
-                  <div className="absolute inset-0 bg-black bg-opacity-80 flex items-center justify-center">
+                {gameState === 'levelComplete' && (
+                  <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-green-400 text-4xl font-bold mb-4">GREAT JOB!</div>
+                      <div className="text-white text-2xl mb-2">Level {level} Complete!</div>
+                      <div className="text-white text-xl mb-6">Score: {score}</div>
+                      <div className="flex gap-4">
+                        <button
+                          onClick={nextLevel}
+                          className="bg-green-600 text-white px-8 py-4 rounded-lg font-bold hover:bg-green-700 text-xl"
+                        >
+                          Continue
+                        </button>
+                        <button
+                          onClick={quitGame}
+                          className="bg-red-600 text-white px-8 py-4 rounded-lg font-bold hover:bg-red-700 text-xl"
+                        >
+                          Quit
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {gameState === 'gameWon' && (
+                  <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="text-yellow-400 text-5xl font-bold mb-4">🎉 YOU WON! 🎉</div>
+                      <div className="text-white text-3xl mb-2">All Levels Complete!</div>
+                      <div className="text-white text-2xl mb-6">Final Score: {score}</div>
+                      <button
+                        onClick={quitGame}
+                        className="bg-yellow-400 text-gray-900 px-8 py-4 rounded-lg font-bold hover:bg-yellow-500 text-xl"
+                      >
+                        Back to Menu
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {gameState === 'gameOver' && (
+                  <div className="absolute inset-0 bg-black bg-opacity-90 flex items-center justify-center">
                     <div className="text-center">
                       <div className="text-red-500 text-4xl font-bold mb-4">GAME OVER</div>
-                      <div className="text-white text-2xl mb-4">Final Score: {score}</div>
-                      <button
-                        onClick={resetGame}
-                        className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700"
-                      >
-                        Play Again
-                      </button>
+                      <div className="text-white text-2xl mb-6">Final Score: {score}</div>
+                      <div className="flex gap-4">
+                        <button
+                          onClick={startGame}
+                          className="bg-blue-600 text-white px-8 py-4 rounded-lg font-bold hover:bg-blue-700 text-xl"
+                        >
+                          Try Again
+                        </button>
+                        <button
+                          onClick={quitGame}
+                          className="bg-red-600 text-white px-8 py-4 rounded-lg font-bold hover:bg-red-700 text-xl"
+                        >
+                          Quit
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="mt-4 text-white text-center">
-                <div className="text-lg mb-2">Use Arrow Keys to Move</div>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                <div></div>
+                <ArrowButton direction="up" onClick={() => handleDirectionButton({ x: 0, y: -1 })} />
+                <div></div>
+                <ArrowButton direction="left" onClick={() => handleDirectionButton({ x: -1, y: 0 })} />
+                <ArrowButton direction="down" onClick={() => handleDirectionButton({ x: 0, y: 1 })} />
+                <ArrowButton direction="right" onClick={() => handleDirectionButton({ x: 1, y: 0 })} />
+              </div>
+
+              <div className="text-white text-center">
                 <div className="text-sm text-gray-400">
-                  Eat dots for points • Power pellets let you eat ghosts • Avoid ghosts!
+                  Eat all dots to complete the level • Avoid ghosts • Power pellets let you eat ghosts!
                 </div>
               </div>
             </div>
